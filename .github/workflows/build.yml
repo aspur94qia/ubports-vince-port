@@ -1,0 +1,27 @@
+name: build
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git kmod libssl-dev unzip wget xz-utils jq android-sdk-libsparse-utils gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt-get install -y python2 libtinfo5 || true
+      - name: Build
+        run: |
+          chmod +x build.sh
+          ./build.sh -b workdir
+      - name: Release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rel
+          find . -path ./build -prune -o \( -name "*.img" -o -name "*.tar.xz" -o -name "deviceinfo" \) -type f -size +10k -print 2>/dev/null | grep -v "^./.git" | head -20 | while read f; do cp "$f" rel/ || true; done
+          ls -l rel
+          gh release create "ut-${{ github.run_number }}" rel/* --title "ut-${{ github.run_number }}" --notes "ubports vince" || true
