@@ -46,7 +46,8 @@ jobs:
           ls -l out
           mv out/rootfs.img out/ubuntu.img
           sha256sum out/ubuntu.img > out/ubuntu.img.sha256
-          xz -T0 -3 out/ubuntu.img
+          sudo chown -R $(id -u):$(id -g) out
+          xz -T0 -3 out/ubuntu.img || [ $? -eq 2 ]
           ls -l out
           split -b 1800M -d out/ubuntu.img.xz out/ubuntu.img.xz.part
           rm -f out/ubuntu.img.xz
