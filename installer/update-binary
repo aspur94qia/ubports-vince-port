@@ -1,0 +1,63 @@
+#!/sbin/sh
+OUTFD=/proc/self/fd/$2
+ZIP="$3"
+ui_print() { echo "ui_print $1" > "$OUTFD"; echo "ui_print" > "$OUTFD"; }
+fail() { ui_print "GAGAL: $1"; ui_print "Boot TIDAK diubah (kecuali tertulis lain)."; exit 1; }
+ui_print "Ubuntu Touch - Redmi 5 Plus (vince)"
+DEV=$(getprop ro.product.device)
+case "$DEV" in vince*|"") ;; *) fail "perangkat $DEV bukan vince";; esac
+
+mount_data() {
+  grep -q " /data " /proc/mounts && return 0
+  mount /data 2>/dev/null
+  grep -q " /data " /proc/mounts && return 0
+  UD=/dev/block/bootdevice/by-name/userdata
+  [ -e "$UD" ] || UD=$(ls /dev/block/platform/*/by-name/userdata 2>/dev/null | head -1)
+  [ -e "$UD" ] || return 1
+  mkdir -p /data
+  for T in ext4 f2fs; do
+    mount -t $T "$UD" /data 2>/dev/null
+    grep -q " /data " /proc/mounts && return 0
+  done
+  return 1
+}
+can_write() { echo ok > /data/.ut_test 2>/dev/null && rm -f /data/.ut_test; }
+
+mount_data || fail "/data tidak bisa di-mount. Di TWRP: Mount > Decrypt Data (isi PIN/pola), lalu ulangi. Tidak ada yang diformat"
+if ! can_write; then
+  mount -o remount,rw /data 2>/dev/null
+  can_write || fail "/data tidak bisa ditulis (kemungkinan masih terenkripsi). Decrypt Data di TWRP lalu ulangi. Tidak ada yang diformat"
+fi
+ui_print "/data siap, lanjut flash"
+
+SIZE=$(unzip -p "$ZIP" ubuntu.img.size)
+set -- $(df -Pk /data | tail -1)
+FREE=$4
+NEED=$(( SIZE / 1024 + 300000 ))
+ui_print "Ruang kosong: $FREE KB, dibutuhkan: $NEED KB"
+[ "$FREE" -ge "$NEED" ] || fail "ruang /data kurang"
+BP=/dev/block/bootdevice/by-name/boot
+[ -e "$BP" ] || BP=$(ls /dev/block/platform/*/by-name/boot 2>/dev/null | head -1)
+[ -e "$BP" ] || fail "partisi boot tidak ketemu"
+[ -f /data/boot-before-ut.img ] || dd if="$BP" of=/data/boot-before-ut.img bs=4096 2>/dev/null
+[ -s /data/boot-before-ut.img ] || fail "backup boot gagal"
+ui_print "Menulis ubuntu.img ke /data (beberapa menit)..."
+rm -f /data/ubuntu.img /data/ubuntu.img.tmp
+unzip -p "$ZIP" ubuntu.img > /data/ubuntu.img.tmp || { rm -f /data/ubuntu.img.tmp; fail "ekstrak rootfs gagal"; }
+GOT=$(wc -c < /data/ubuntu.img.tmp)
+[ "$GOT" = "$SIZE" ] || { rm -f /data/ubuntu.img.tmp; fail "ukuran rootfs salah ($GOT != $SIZE)"; }
+sync
+ui_print "Verifikasi SHA-256..."
+WANT=$(unzip -p "$ZIP" ubuntu.img.sha256)
+HAVE=$(sha256sum /data/ubuntu.img.tmp | cut -d' ' -f1)
+[ "$WANT" = "$HAVE" ] || { rm -f /data/ubuntu.img.tmp; fail "hash rootfs tidak cocok"; }
+mv /data/ubuntu.img.tmp /data/ubuntu.img
+sync
+ui_print "Rootfs OK. Menulis boot..."
+unzip -o "$ZIP" boot.img -d /tmp
+BSZ=$(wc -c < /tmp/boot.img)
+dd if=/tmp/boot.img of="$BP" bs=4096 2>/dev/null
+sync
+head -c "$BSZ" "$BP" | cmp - /tmp/boot.img || { ui_print "VERIFIKASI BOOT GAGAL. Pulihkan boot Android dari backup lewat Install Image"; exit 1; }
+ui_print "Selesai. Reboot sistem. Boot pertama bisa lama."
+exit 0
