@@ -13,6 +13,8 @@ jobs:
           sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git kmod libssl-dev unzip wget xz-utils jq android-sdk-libsparse-utils gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           sudo apt-get install -y python2 libtinfo5 || true
       - name: Build
+        env:
+          CLANG_TRIPLE: aarch64-linux-gnu-
         run: |
           chmod +x build.sh
           ./build.sh -b workdir
