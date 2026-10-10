@@ -14,7 +14,7 @@ jobs:
       - name: Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git kmod libssl-dev unzip wget xz-utils jq android-sdk-libsparse-utils gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi e2fsprogs fakeroot rsync xz-utils zstd
+          sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git kmod libssl-dev unzip zip wget xz-utils jq android-sdk-libsparse-utils gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi e2fsprogs fakeroot rsync zstd
           sudo apt-get install -y python2 libtinfo5 || true
       - name: Pulihkan cache unduhan
         id: restore
@@ -37,20 +37,26 @@ jobs:
           chmod +x build.sh
           ./build.sh -b workdir
           ls -l out
-      - name: Rakit rootfs Ubuntu Touch
+      - name: Rakit rootfs dan zip installer TWRP
         run: |
           set -ex
           ./build/prepare-fake-ota.sh out/device_vince.tar.xz ota
           sudo ./build/system-image-from-ota.sh ota/ubuntu_command out
-          sudo chown -R $USER out
-          ls -l out
-          mv out/rootfs.img out/ubuntu.img
-          sha256sum out/ubuntu.img > out/ubuntu.img.sha256
           sudo chown -R $(id -u):$(id -g) out
-          xz -T0 -3 out/ubuntu.img || [ $? -eq 2 ]
-          ls -l out
-          split -b 1800M -d out/ubuntu.img.xz out/ubuntu.img.xz.part
-          rm -f out/ubuntu.img.xz
+          rm -f out/system.img
+          mv out/rootfs.img out/ubuntu.img
+          sha256sum out/ubuntu.img | cut -d' ' -f1 > out/ubuntu.img.sha256
+          Z=zipdir
+          mkdir -p $Z/META-INF/com/google/android
+          cp installer/update-binary $Z/META-INF/com/google/android/update-binary
+          chmod 755 $Z/META-INF/com/google/android/update-binary
+          echo "# dummy" > $Z/META-INF/com/google/android/updater-script
+          cp out/boot.img $Z/boot.img
+          mv out/ubuntu.img $Z/ubuntu.img
+          cp out/ubuntu.img.sha256 $Z/ubuntu.img.sha256
+          stat -c %s $Z/ubuntu.img > $Z/ubuntu.img.size
+          (cd $Z && zip -r -6 ../out/ubuntu-touch-vince-installer.zip .)
+          sha256sum out/ubuntu-touch-vince-installer.zip | cut -d' ' -f1 > out/installer.zip.sha256
           ls -l out
       - name: Bersihkan sebelum simpan cache
         if: always()
@@ -69,6 +75,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p rel
-          cp out/boot.img out/device_vince.tar.xz out/ubuntu.img.sha256 out/ubuntu.img.xz.part* rel/ 2>/dev/null || true
+          cp out/boot.img out/device_vince.tar.xz out/installer.zip.sha256 rel/ 2>/dev/null || true
+          Z=out/ubuntu-touch-vince-installer.zip
+          if [ -f $Z ]; then
+            S=$(stat -c %s $Z)
+            if [ $S -lt 2000000000 ]; then cp $Z rel/; else split -b 1900M -d $Z rel/ubuntu-touch-vince-installer.zip.part; fi
+          fi
           ls -l rel
-          gh release create "ut-${{ github.run_number }}" rel/* --title "ut-${{ github.run_number }}" --notes "ubports vince: boot.img + ubuntu.img.xz (gabung: cat ubuntu.img.xz.part* | xz -d > ubuntu.img)" || true
+          gh release create "ut-${{ github.run_number }}" rel/* --title "ut-${{ github.run_number }}" --notes "TWRP installer vince: flash ubuntu-touch-vince-installer.zip (kalau ada .partNN: cat *.part* > ubuntu-touch-vince-installer.zip)" || true
