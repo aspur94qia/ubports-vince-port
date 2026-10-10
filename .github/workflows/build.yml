@@ -12,12 +12,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ca-certificates cpio curl flex git kmod libssl-dev unzip wget xz-utils jq android-sdk-libsparse-utils gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
           sudo apt-get install -y python2 libtinfo5 || true
+      - name: Pulihkan cache unduhan
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: workdir/downloads
+          key: ut-dl-${{ github.run_number }}
+          restore-keys: |
+            ut-dl-
+      - name: Kernel selalu segar
+        run: |
+          echo "cache cocok: ${{ steps.restore.outputs.cache-matched-key }}"
+          rm -rf workdir/downloads/android_kernel_vince_unitrix workdir/downloads/KERNEL_OBJ
+          du -sh workdir/downloads 2>/dev/null || true
       - name: Build
         env:
           CLANG_TRIPLE: aarch64-linux-gnu-
         run: |
           chmod +x build.sh
           ./build.sh -b workdir
+      - name: Bersihkan sebelum simpan cache
+        if: always()
+        run: |
+          rm -rf workdir/downloads/android_kernel_vince_unitrix workdir/downloads/KERNEL_OBJ
+          du -sh workdir/downloads 2>/dev/null || true
+      - name: Simpan cache unduhan
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workdir/downloads
+          key: ut-dl-${{ github.run_number }}
       - name: Release
         if: always()
         env:
