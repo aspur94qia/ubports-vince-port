@@ -92,4 +92,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "ut-fix-${{ github.run_number }}" ubports-vince-fix.zip ubports-vince-fix.zip.sha256 --title "ut-fix-${{ github.run_number }}" --notes "Zip resmi ubports-on-vince dengan mount /data diperbaiki (tanpa format). Flash lewat TWRP."
+          gh release create -R "${{ github.repository }}" "ut-fix-${{ github.run_number }}" ubports-vince-fix.zip ubports-vince-fix.zip.sha256 --title "ut-fix-${{ github.run_number }}" --notes "Zip resmi ubports-on-vince dengan mount /data diperbaiki (tanpa format). Flash lewat TWRP."
