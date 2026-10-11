@@ -1,0 +1,95 @@
+name: ut-fix
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  rakit:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Unduh zip resmi
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p src
+          gh release download -R ubports-on-vince/ubports-ci --pattern '*.zip' --dir src
+          ls -l src
+      - name: Bongkar dan ubah skrip pasang
+        run: |
+          set -e
+          Z=$(ls src/*.zip | head -1)
+          mkdir -p w
+          cd w
+          unzip -q "../$Z"
+          test -f halium-boot.img
+          test -f rootfs.img.gz
+          test -f system.img.gz
+          test -f META-INF/com/google/android/update-binary
+          RS=$(gzip -dc rootfs.img.gz | wc -c)
+          SS=$(gzip -dc system.img.gz | wc -c)
+          NEED_KB=$(( (RS + SS) / 1024 + 500000 ))
+          echo "rootfs=${RS} system=${SS} butuh_kb=${NEED_KB}"
+          cat > META-INF/com/google/android/updater-script <<'ES'
+          assert(getprop("ro.product.device") == "vince" || getprop("ro.build.product") == "vince" || abort("E3004: paket ini untuk vince; perangkat ini " + getprop("ro.product.device") + "."););
+          ui_print("");
+          ui_print("========================================");
+          ui_print("Ubuntu Touch for Xiaomi Redmi 5 Plus (beta)");
+          ui_print("Versi perbaikan: TANPA format data");
+          ui_print("========================================");
+          ui_print("Mounting data ...");
+          run_program("/sbin/sh", "-c", "grep -q ' /data ' /proc/mounts || mount /data 2>/dev/null; grep -q ' /data ' /proc/mounts || mount -t ext4 /dev/block/bootdevice/by-name/userdata /data 2>/dev/null; grep -q ' /data ' /proc/mounts || mount -t f2fs /dev/block/bootdevice/by-name/userdata /data 2>/dev/null; true");
+          if run_program("/sbin/sh", "-c", "grep -q ' /data ' /proc/mounts") != "0" then
+            abort("E: /data tidak bisa di-mount. Di TWRP pilih Mount lalu Decrypt Data, kemudian ulangi. Tidak ada yang diformat, boot tidak diubah.");
+          endif;
+          if run_program("/sbin/sh", "-c", "echo ok > /data/.ut_test && rm -f /data/.ut_test") != "0" then
+            abort("E: /data tidak bisa ditulis. Boot tidak diubah.");
+          endif;
+          ui_print("Cek ruang kosong /data ...");
+          if run_program("/sbin/sh", "-c", "A=$(df -Pk /data | tail -1 | tr -s ' ' | cut -d' ' -f4); [ $A -ge __NEED_KB__ ]") != "0" then
+            abort("E: ruang /data kurang. Kosongkan dulu. Boot tidak diubah.");
+          endif;
+          ui_print("Extracting rootfs.img.gz archive to /data ...");
+          package_extract_file("rootfs.img.gz", "/data/rootfs.img.gz");
+          set_progress(0.2);
+          ui_print("Extracting system.img.gz archive to /data ...");
+          package_extract_file("system.img.gz", "/data/system.img.gz");
+          ui_print("Unpacking rootfs.img ...");
+          run_program("/sbin/gunzip", "-f", "/data/rootfs.img.gz");
+          set_progress(0.5);
+          ui_print("Unpacking system.img ...");
+          run_program("/sbin/gunzip", "-f", "/data/system.img.gz");
+          if run_program("/sbin/sh", "-c", "[ -s /data/rootfs.img ] && [ -s /data/system.img ]") != "0" then
+            abort("E: rootfs/system gagal diekstrak (ruang atau tulis gagal). Boot tidak diubah.");
+          endif;
+          ui_print("Backuping kernel ...");
+          run_program("/sbin/busybox", "dd", "if=/dev/block/bootdevice/by-name/boot", "of=/data/android.img");
+          set_progress(0.7);
+          ui_print("Flashing halium-boot.img (Ubuntu's kernel) ...");
+          package_extract_file("halium-boot.img", "/dev/block/bootdevice/by-name/boot");
+          package_extract_file("halium-boot.img", "/data/ubuntu.img");
+          set_progress(0.9);
+          ui_print("========================================");
+          ui_print("Default system password is: 1234");
+          ui_print("Kembali ke Android: flash /data/android.img ke boot. Ke Ubuntu: flash /data/ubuntu.img ke boot.");
+          ui_print("========================================");
+          ui_print("OK");
+          ES
+          sed -i "s/__NEED_KB__/${NEED_KB}/" META-INF/com/google/android/updater-script
+          chmod 755 META-INF/com/google/android/update-binary
+          zip -r -0 ../ubports-vince-fix.zip halium-boot.img rootfs.img.gz system.img.gz META-INF
+          cd ..
+          sha256sum ubports-vince-fix.zip | cut -d' ' -f1 > ubports-vince-fix.zip.sha256
+          ls -l ubports-vince-fix.zip
+      - name: Ringkasan
+        run: |
+          echo "=====MULAI-RINGKASAN====="
+          unzip -l ubports-vince-fix.zip
+          echo "sha256: $(cat ubports-vince-fix.zip.sha256)"
+          echo "--- updater-script baru (baris mount sampai cek ruang)"
+          unzip -p ubports-vince-fix.zip META-INF/com/google/android/updater-script | sed -n '1,28p' | cut -c1-200
+          echo "=====AKHIR-RINGKASAN====="
+      - name: Rilis
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "ut-fix-${{ github.run_number }}" ubports-vince-fix.zip ubports-vince-fix.zip.sha256 --title "ut-fix-${{ github.run_number }}" --notes "Zip resmi ubports-on-vince dengan mount /data diperbaiki (tanpa format). Flash lewat TWRP."
