@@ -25,10 +25,17 @@ jobs:
           test -f rootfs.img.gz
           test -f system.img.gz
           test -f META-INF/com/google/android/update-binary
+          echo "--- jenis update-binary"
+          file META-INF/com/google/android/update-binary || true
+          if head -c 2 META-INF/com/google/android/update-binary | grep -q '#!'; then
+            echo "GAGAL: update-binary adalah skrip shell, updater-script baru akan diabaikan."
+            exit 1
+          fi
           RS=$(gzip -dc rootfs.img.gz | wc -c)
           SS=$(gzip -dc system.img.gz | wc -c)
-          NEED_KB=$(( (RS + SS) / 1024 + 500000 ))
-          echo "rootfs=${RS} system=${SS} butuh_kb=${NEED_KB}"
+          GS=$(( $(stat -c%s rootfs.img.gz) + $(stat -c%s system.img.gz) ))
+          NEED_KB=$(( (RS + SS + GS) / 1024 + 500000 ))
+          echo "rootfs=${RS} system=${SS} gz=${GS} butuh_kb=${NEED_KB}"
           cat > META-INF/com/google/android/updater-script <<'ES'
           assert(getprop("ro.product.device") == "vince" || getprop("ro.build.product") == "vince" || abort("E3004: paket ini untuk vince; perangkat ini " + getprop("ro.product.device") + "."););
           ui_print("");
@@ -41,6 +48,9 @@ jobs:
           if run_program("/sbin/sh", "-c", "grep -q ' /data ' /proc/mounts") != "0" then
             abort("E: /data tidak bisa di-mount. Di TWRP pilih Mount lalu Decrypt Data, kemudian ulangi. Tidak ada yang diformat, boot tidak diubah.");
           endif;
+          if run_program("/sbin/sh", "-c", "grep ' /data ' /proc/mounts | grep -q ' ext4 '") != "0" then
+            abort("E: /data bukan ext4 (f2fs atau terenkripsi). Kernel Halium tidak bisa mount. Ubah ke ext4 di TWRP dulu. Boot tidak diubah.");
+          endif;
           if run_program("/sbin/sh", "-c", "echo ok > /data/.ut_test && rm -f /data/.ut_test") != "0" then
             abort("E: /data tidak bisa ditulis. Boot tidak diubah.");
           endif;
@@ -48,21 +58,24 @@ jobs:
           if run_program("/sbin/sh", "-c", "A=$(df -Pk /data | tail -1 | tr -s ' ' | cut -d' ' -f4); [ $A -ge __NEED_KB__ ]") != "0" then
             abort("E: ruang /data kurang. Kosongkan dulu. Boot tidak diubah.");
           endif;
+          ui_print("Backuping kernel ...");
+          run_program("/sbin/sh", "-c", "[ -s /data/android.img ] || dd if=/dev/block/bootdevice/by-name/boot of=/data/android.img");
+          if run_program("/sbin/sh", "-c", "[ -s /data/android.img ]") != "0" then
+            abort("E: backup boot gagal dibuat. Boot tidak diubah.");
+          endif;
           ui_print("Extracting rootfs.img.gz archive to /data ...");
           package_extract_file("rootfs.img.gz", "/data/rootfs.img.gz");
           set_progress(0.2);
           ui_print("Extracting system.img.gz archive to /data ...");
           package_extract_file("system.img.gz", "/data/system.img.gz");
           ui_print("Unpacking rootfs.img ...");
-          run_program("/sbin/gunzip", "-f", "/data/rootfs.img.gz");
+          run_program("/sbin/busybox", "gunzip", "-f", "/data/rootfs.img.gz");
           set_progress(0.5);
           ui_print("Unpacking system.img ...");
-          run_program("/sbin/gunzip", "-f", "/data/system.img.gz");
+          run_program("/sbin/busybox", "gunzip", "-f", "/data/system.img.gz");
           if run_program("/sbin/sh", "-c", "[ -s /data/rootfs.img ] && [ -s /data/system.img ]") != "0" then
             abort("E: rootfs/system gagal diekstrak (ruang atau tulis gagal). Boot tidak diubah.");
           endif;
-          ui_print("Backuping kernel ...");
-          run_program("/sbin/busybox", "dd", "if=/dev/block/bootdevice/by-name/boot", "of=/data/android.img");
           set_progress(0.7);
           ui_print("Flashing halium-boot.img (Ubuntu's kernel) ...");
           package_extract_file("halium-boot.img", "/dev/block/bootdevice/by-name/boot");
@@ -85,8 +98,7 @@ jobs:
           echo "=====MULAI-RINGKASAN====="
           unzip -l ubports-vince-fix.zip
           echo "sha256: $(cat ubports-vince-fix.zip.sha256)"
-          echo "--- updater-script baru (baris mount sampai cek ruang)"
-          unzip -p ubports-vince-fix.zip META-INF/com/google/android/updater-script | sed -n '1,28p' | cut -c1-200
+          unzip -p ubports-vince-fix.zip META-INF/com/google/android/updater-script | sed -n '1,34p' | cut -c1-200
           echo "=====AKHIR-RINGKASAN====="
       - name: Rilis
         env:
