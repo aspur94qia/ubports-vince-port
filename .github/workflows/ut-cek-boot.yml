@@ -1,0 +1,49 @@
+name: ut-cek-boot
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  cek:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Unduh halium-boot.img resmi
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p src
+          gh release download -R ubports-on-vince/ubports-ci --pattern '*.zip' --dir src
+          unzip -q -o src/*.zip halium-boot.img -d src
+          ls -l src/halium-boot.img
+      - name: Pasang alat
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y abootimg lz4 cpio binutils
+      - name: Periksa kernel dan initramfs
+        run: |
+          set +e
+          cd src
+          echo "=====MULAI-RINGKASAN====="
+          echo "### HEADER BOOT"
+          abootimg -i halium-boot.img | cut -c1-220
+          abootimg -x halium-boot.img bootimg.cfg zImage initrd.img
+          ls -l zImage initrd.img
+          echo
+          echo "### KERNEL: dukungan filesystem (jumlah penanda di kernel)"
+          gzip -dc zImage 2>/dev/null > kernel.raw
+          [ -s kernel.raw ] || cp zImage kernel.raw
+          echo "f2fs : $(grep -a -c 'F2FS-fs' kernel.raw)"
+          echo "ext4 : $(grep -a -c 'EXT4-fs' kernel.raw)"
+          echo "versi: $(grep -a -o 'Linux version [0-9a-zA-Z._+-]*' kernel.raw | head -1)"
+          echo
+          echo "### INITRAMFS"
+          mkdir -p rd
+          cd rd
+          (gzip -dc ../initrd.img 2>/dev/null || lz4 -dc ../initrd.img 2>/dev/null) | sudo cpio -idm --quiet 2>/dev/null
+          ls
+          echo "--- baris yang menyebut f2fs di initramfs"
+          sudo grep -rIn -i 'f2fs' . 2>/dev/null | head -15 | cut -c1-200
+          echo "--- cara initramfs me-mount data"
+          sudo grep -n -E 'datapart|mount .*data|/data|mount_data|ext4' scripts/halium 2>/dev/null | head -40 | cut -c1-200
+          cd ..
+          echo "=====AKHIR-RINGKASAN====="
