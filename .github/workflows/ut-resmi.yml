@@ -1,0 +1,76 @@
+name: ut-resmi
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  inspeksi:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Unduh aset rilis terbaru
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ut
+          gh release download -R ubports-on-vince/ubports-ci --dir ut || echo "unduh aset gagal atau tidak ada aset"
+          ls -l ut || true
+      - name: Salin repo ubports-ci
+        run: |
+          git clone --depth=1 https://github.com/ubports-on-vince/ubports-ci ci || echo "clone gagal"
+      - name: Ringkasan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          echo "=====MULAI-RINGKASAN====="
+          echo "### RILIS TERBARU"
+          gh release view -R ubports-on-vince/ubports-ci --json tagName,publishedAt,assets --jq '"tag: \(.tagName)  tanggal: \(.publishedAt)", (.assets[] | "aset: \(.name)  \(.size) byte")'
+          echo
+          echo "### BERKAS DI ut/"
+          ls -l ut
+          for z in ut/*.zip; do
+            [ -f "$z" ] || continue
+            echo
+            echo "### ZIP: $z"
+            unzip -l "$z" | head -50
+            for f in META-INF/com/google/android/updater-script META-INF/com/google/android/update-binary; do
+              if unzip -l "$z" "$f" >/dev/null 2>&1; then
+                H=$(unzip -p "$z" "$f" | head -c 2)
+                if [ "$H" = "#!" ] || [ "$f" = "META-INF/com/google/android/updater-script" ]; then
+                  echo "--- ISI $f"
+                  unzip -p "$z" "$f" | head -n 220 | cut -c 1-220
+                else
+                  echo "--- $f adalah biner (bukan skrip teks)"
+                fi
+              fi
+            done
+          done
+          echo
+          echo "### REPO ubports-ci: DAFTAR BERKAS"
+          (cd ci && git ls-files | head -80)
+          for f in package.sh halium.env build-hal.sh; do
+            if [ -f "ci/$f" ]; then
+              echo
+              echo "--- ISI $f"
+              head -n 160 "ci/$f" | cut -c 1-220
+            fi
+          done
+          for f in ci/META-INF/com/google/android/*; do
+            if [ -f "$f" ]; then
+              echo
+              echo "--- ISI $f"
+              if head -c 2 "$f" | grep -q '#!' || [ "$(basename "$f")" = "updater-script" ]; then
+                head -n 220 "$f" | cut -c 1-220
+              else
+                echo "(biner, ukuran $(stat -c %s "$f") byte)"
+              fi
+            fi
+          done
+          for f in ci/.github/workflows/*; do
+            if [ -f "$f" ]; then
+              echo
+              echo "--- ISI $f"
+              head -n 140 "$f" | cut -c 1-220
+            fi
+          done
+          echo "=====AKHIR-RINGKASAN====="
